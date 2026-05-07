@@ -5,18 +5,17 @@ import { IconChevronUp, IconChevronDown, IconSelector } from "@tabler/icons-reac
 import { useRouter } from "next/navigation";
 import { useUser } from "@/app/components/provider/UserContext";
 import { Ticket } from "./ticket-utils";
+import { type TicketSort } from "./ticket-list";
 import { RelativeTime } from "@/app/components/datetime";
 
-export type SortDirection = "asc" | "desc" | null;
-export type SortField = "id" | "title" | "assigned_to_id" | "created_at" | null;
+type SortableField = "id" | "title" | "assigned_to_id" | "created_at";
 
 interface TicketTableProps {
   tickets: Ticket[];
   loading?: boolean;
   showTitle?: boolean;
-  sortField?: SortField;
-  sortDirection?: SortDirection;
-  onSort?: (field: SortField, direction: SortDirection) => void;
+  sort?: TicketSort;
+  onSortChange?: (sort: TicketSort | undefined) => void;
   onStatusToggle?: () => void;
   filterParams?: string;
 }
@@ -48,41 +47,43 @@ export const getStatusColor = (status: string) => {
   }
 };
 
+function decodeSort(sort: TicketSort | undefined): {
+  field: SortableField | null;
+  direction: "asc" | "desc" | null;
+} {
+  if (!sort) return { field: null, direction: null };
+  const desc = sort.startsWith("-");
+  const field = (desc ? sort.slice(1) : sort) as SortableField;
+  return { field, direction: desc ? "desc" : "asc" };
+}
+
+function nextSort(current: TicketSort | undefined, field: SortableField): TicketSort | undefined {
+  const { field: curField, direction } = decodeSort(current);
+  if (curField !== field) return field as TicketSort; // new field → asc
+  if (direction === "asc") return `-${field}` as TicketSort; // asc → desc
+  return undefined; // desc → off
+}
+
 export default function TicketTable({
-  tickets: tickets,
+  tickets,
   loading = false,
   showTitle = true,
-  sortField = null,
-  sortDirection = null,
-  onSort,
+  sort,
+  onSortChange,
   onStatusToggle,
   filterParams,
 }: TicketTableProps) {
   const router = useRouter();
   const { user } = useUser();
 
-  const handleSort = (field: SortField) => {
-    if (!onSort) return;
+  const { field: sortField, direction: sortDirection } = decodeSort(sort);
 
-    let newDirection: SortDirection;
-    if (sortField !== field) {
-      // New field, start with ascending
-      newDirection = "asc";
-    } else if (sortDirection === "asc") {
-      // Currently ascending, switch to descending
-      newDirection = "desc";
-    } else if (sortDirection === "desc") {
-      // Currently descending, turn off
-      newDirection = null;
-    } else {
-      // Currently off, start with ascending
-      newDirection = "asc";
-    }
-
-    onSort(newDirection ? field : null, newDirection);
+  const handleSort = (field: SortableField) => {
+    if (!onSortChange) return;
+    onSortChange(nextSort(sort, field));
   };
 
-  const getSortIcon = (field: SortField) => {
+  const getSortIcon = (field: SortableField) => {
     if (sortField !== field) {
       return <IconSelector size={14} style={{ opacity: 0.5 }} />;
     }

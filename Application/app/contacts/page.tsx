@@ -27,12 +27,15 @@ import { useRouter } from "next/navigation";
 import { apiClient } from "@/app/lib/apiClient";
 import { useForm } from "@mantine/form";
 import { TicketBulkCreateModal } from "@/app/components/tickets/TicketBulkCreateModal";
-import DebouncedRangeSliderInput from "@/app/components/DebouncedRangeSliderInput";
+import RangeSliderInput from "@/app/components/RangeSliderInput";
 import ContactTable, { type Contact, type Tag } from "@/app/components/ContactTable";
 import { type EventCategory } from "@/app/components/event-utils";
+import { useDebouncedValue } from "@mantine/hooks";
 import "./page.css";
 
 const MAX_TAG_COUNT = 99999;
+const CONTACT_FILTER_DEBOUNCE_MS = 300;
+const RANGE_LIMITS: [number, number] = [0, 20];
 
 export default function ContactsPage() {
   const router = useRouter();
@@ -42,12 +45,10 @@ export default function ContactsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [tagMode, setTagMode] = useState<"any" | "all">("any");
-  const [startDate, setStartDate] = useState<string | null>("");
-  const [endDate, setEndDate] = useState<string | null>("");
-  const [eventRange, setEventRange] = useState<[number, number]>([0, 20]);
-  const [ticketRange, setTicketRange] = useState<[number, number]>([0, 20]);
-  const [debouncedEventRange, setDebouncedEventRange] = useState<[number, number]>([0, 20]);
-  const [debouncedTicketRange, setDebouncedTicketRange] = useState<[number, number]>([0, 20]);
+  const [startDate, setStartDate] = useState<string | null>(null);
+  const [endDate, setEndDate] = useState<string | null>(null);
+  const [eventRange, setEventRange] = useState<[number, number]>(RANGE_LIMITS);
+  const [ticketRange, setTicketRange] = useState<[number, number]>(RANGE_LIMITS);
   const [tags, setTags] = useState<Tag[]>([]);
   const [nextUrl, setNextUrl] = useState<string | null>(null);
   const [previousUrl, setPreviousUrl] = useState<string | null>(null);
@@ -68,9 +69,9 @@ export default function ContactsPage() {
       tags: [],
     },
     validate: {
-      discord_id: (value) => (!value ? "Discord ID is required" : null),
-      full_name: (value) => (!value ? "Full name is required" : null),
-      email: (value) => (value && !/^\S+@\S+$/.test(value) ? "Invalid email" : null),
+      discord_id: (value: string) => (!value ? "Discord ID is required" : null),
+      full_name: (value: string) => (!value ? "Full name is required" : null),
+      email: (value: string) => (value && !/^\S+@\S+$/.test(value) ? "Invalid email" : null),
     },
   });
 
@@ -96,6 +97,11 @@ export default function ContactsPage() {
     fetchGroupsAndTags();
   }, []);
 
+  const [debouncedSearchQuery] = useDebouncedValue(searchQuery, CONTACT_FILTER_DEBOUNCE_MS);
+  const [debouncedEventRange] = useDebouncedValue(eventRange, CONTACT_FILTER_DEBOUNCE_MS);
+  const [debouncedTicketRange] = useDebouncedValue(ticketRange, CONTACT_FILTER_DEBOUNCE_MS);
+  const [debouncedSelectedTagIds] = useDebouncedValue(selectedTagIds, CONTACT_FILTER_DEBOUNCE_MS);
+
   const fetchContacts = useCallback(
     async (url?: string) => {
       try {
@@ -105,23 +111,27 @@ export default function ContactsPage() {
 
         if (!fetchUrl) {
           const params = new URLSearchParams();
-          if (searchQuery) params.append("search", searchQuery);
-          if (debouncedEventRange[0] > 0)
+          if (debouncedSearchQuery !== "") params.append("search", debouncedSearchQuery.trim());
+          if (debouncedEventRange[0] > RANGE_LIMITS[0])
             params.append("min_events", debouncedEventRange[0].toString());
-          if (debouncedEventRange[1] < 20)
+          if (debouncedEventRange[1] < RANGE_LIMITS[1])
             params.append("max_events", debouncedEventRange[1].toString());
-          if (debouncedTicketRange[0] > 0)
+          if (debouncedTicketRange[0] > RANGE_LIMITS[0])
             params.append("min_tickets", debouncedTicketRange[0].toString());
-          if (debouncedTicketRange[1] < 20)
+          if (debouncedTicketRange[1] < RANGE_LIMITS[1])
             params.append("max_tickets", debouncedTicketRange[1].toString());
-          if (startDate) params.append("start_date", startDate);
-          if (endDate) params.append("end_date", endDate);
-          if (selectedCategoryId) params.append("event_category_id", selectedCategoryId);
-          if (selectedTagIds.length > 0) {
-            params.append("tag_ids", selectedTagIds.join(","));
+          if (startDate !== null) params.append("start_date", startDate);
+          if (endDate !== null) params.append("end_date", endDate);
+          if (selectedCategoryId !== null) params.append("event_category_id", selectedCategoryId);
+          if (debouncedSelectedTagIds.length > 0) {
+            params.append("tag_ids", debouncedSelectedTagIds.join(","));
             params.append("tag_mode", tagMode);
           }
-          fetchUrl = `/contacts/?${params}`;
+          if (params.size > 0) {
+            fetchUrl = `/contacts/?${params}`;
+          } else {
+            fetchUrl = "/contacts/";
+          }
         }
 
         const data = await apiClient.get<{
@@ -129,7 +139,7 @@ export default function ContactsPage() {
           count: number;
           next: string | null;
           previous: string | null;
-        }>(fetchUrl || `/contacts/`);
+        }>(fetchUrl);
 
         setContacts(data.results);
         setTotalCount(data.count);
@@ -145,9 +155,9 @@ export default function ContactsPage() {
       debouncedEventRange,
       debouncedTicketRange,
       endDate,
-      searchQuery,
+      debouncedSearchQuery,
       selectedCategoryId,
-      selectedTagIds,
+      debouncedSelectedTagIds,
       tagMode,
       startDate,
     ]
@@ -161,12 +171,10 @@ export default function ContactsPage() {
     setSearchQuery("");
     setSelectedTagIds([]);
     setTagMode("any");
-    setEventRange([0, 20]);
-    setTicketRange([0, 20]);
-    setDebouncedEventRange([0, 20]);
-    setDebouncedTicketRange([0, 20]);
-    setStartDate("");
-    setEndDate("");
+    setEventRange(RANGE_LIMITS);
+    setTicketRange(RANGE_LIMITS);
+    setStartDate(null);
+    setEndDate(null);
     setSelectedCategoryId(null);
   };
 
@@ -214,6 +222,14 @@ export default function ContactsPage() {
     }
   };
 
+  function rangeLabelFormatter(n: number): string {
+    if (n === RANGE_LIMITS[1]) {
+      return `${RANGE_LIMITS[1]}+`;
+    } else {
+      return n.toString();
+    }
+  }
+
   const toggleRowSelection = (id: number) => {
     setSelectedRows((prev) => {
       const next = new Set(prev);
@@ -253,12 +269,14 @@ export default function ContactsPage() {
                 label="Start Date"
                 value={startDate}
                 onChange={setStartDate}
+                clearable
                 placeholder="Start Date..."
                 leftSection={<IconCalendar size={16} />}
               />
               <DateInput
                 label="End Date"
                 onChange={setEndDate}
+                clearable
                 value={endDate}
                 placeholder="End Date..."
                 leftSection={<IconCalendar size={16} />}
@@ -285,6 +303,7 @@ export default function ContactsPage() {
                   }}
                 />
                 <MultiSelect
+                  aria-label="Tag Ids"
                   data={tags.map((t) => ({ value: String(t.id), label: t.name }))}
                   value={selectedTagIds}
                   onChange={setSelectedTagIds}
@@ -312,25 +331,23 @@ export default function ContactsPage() {
                 clearable
               />
 
-              <DebouncedRangeSliderInput
+              <RangeSliderInput
                 label="# of Events Attended"
-                min={0}
-                max={20}
+                min={RANGE_LIMITS[0]}
+                max={RANGE_LIMITS[1]}
                 minRange={0}
                 value={eventRange}
                 onChange={setEventRange}
-                onDebouncedChange={setDebouncedEventRange}
-                labelFormatter={(v) => (v === 20 ? "20+" : v)}
+                labelFormatter={rangeLabelFormatter}
               />
-              <DebouncedRangeSliderInput
+              <RangeSliderInput
                 label="# of Closed Tickets"
-                min={0}
-                max={20}
+                min={RANGE_LIMITS[0]}
+                max={RANGE_LIMITS[1]}
                 minRange={0}
                 value={ticketRange}
                 onChange={setTicketRange}
-                onDebouncedChange={setDebouncedTicketRange}
-                labelFormatter={(v) => (v === 20 ? "20+" : v)}
+                labelFormatter={rangeLabelFormatter}
               />
               <Button variant="outline" onClick={handleReset} ml="auto">
                 Reset

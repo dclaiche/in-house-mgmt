@@ -7,6 +7,12 @@ afterEach(() => {
   cleanup();
 });
 
+// prevent error from missing function
+Object.defineProperty(Element.prototype, "scrollIntoView", {
+  writable: true,
+  value: vi.fn().mockImplementation(() => undefined),
+});
+
 // Mock window.matchMedia (required for Mantine components)
 Object.defineProperty(window, "matchMedia", {
   writable: true,

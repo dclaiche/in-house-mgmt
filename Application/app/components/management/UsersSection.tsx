@@ -24,6 +24,7 @@ import {
   IconBan,
   IconCheck,
   IconSearch,
+  IconFocus2,
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { GroupBadge } from "@/app/components/GroupBadge";
@@ -147,6 +148,19 @@ export default function UsersSection({ onUserCreated }: Props) {
       notifications.show({
         title: "Error",
         message: err instanceof Error ? err.message : "Failed to update groups",
+        color: "red",
+      });
+    }
+  };
+
+  const handleImpersonate = async (user: ManagedUser) => {
+    try {
+      await apiClient.post(`/management/users/${user.id}/impersonate/`, {});
+      window.location.replace("/");
+    } catch (err) {
+      notifications.show({
+        title: "Error",
+        message: err instanceof Error ? err.message : "Failed to impersonate user",
         color: "red",
       });
     }
@@ -401,6 +415,14 @@ export default function UsersSection({ onUserCreated }: Props) {
                       >
                         Edit Discord ID
                       </Menu.Item>
+                      {!user.is_superuser && (
+                        <Menu.Item
+                          leftSection={<IconFocus2 size={14} />}
+                          onClick={() => handleImpersonate(user)}
+                        >
+                          Impersonate
+                        </Menu.Item>
+                      )}
                       <Menu.Item
                         leftSection={
                           user.is_active ? <IconBan size={14} /> : <IconCheck size={14} />

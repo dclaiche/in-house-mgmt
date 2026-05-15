@@ -10,6 +10,7 @@ import {
   IconPhone,
   IconEyeFilled,
   IconLogout,
+  IconUserOff,
   IconBuilding,
   IconChevronLeft,
   IconChevronRight,
@@ -18,6 +19,7 @@ import { NavLink } from "@mantine/core";
 import classes from "./Navbar.module.css";
 import { useState } from "react";
 import { handleLogout } from "@/app/utils/oauth";
+import { apiClient } from "@/app/lib/apiClient";
 import { useUser } from "@/app/components/provider/UserContext";
 
 const notAdminData = [
@@ -34,8 +36,15 @@ const adminOnly = [{ link: "/management", label: "Management", icon: IconEyeFill
 export default function NavbarSimple() {
   const pathname = usePathname();
   const { user } = useUser();
+  const isImpersonating = user?.is_impersonating ?? false;
 
   const [collapsed, setCollapsed] = useState(false);
+
+  const handleStopImpersonating = async () => {
+    await apiClient.delete(`/management/users/${user?.id}/impersonate/`);
+    window.location.replace("/");
+  };
+
   const data = notAdminData;
   const isAdmin = user?.groups.includes("ADMIN") ?? false;
 
@@ -48,7 +57,12 @@ export default function NavbarSimple() {
   }
 
   return (
-    <nav className={classes.navbar} data-collapsed={collapsed || undefined}>
+    <nav
+      className={classes.navbar}
+      data-collapsed={collapsed || undefined}
+      data-imitating={isImpersonating || undefined}
+      data-imitated-name={user?.first_name}
+    >
       <button
         aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         className={classes.collapseButton}
@@ -141,10 +155,22 @@ export default function NavbarSimple() {
           <span className={classes.linkLabel}>Profile</span>
         </Link>
 
-        <a aria-label="Logout" href="#" className={classes.link} onClick={handleLogout}>
-          <IconLogout className={classes.linkIcon} stroke={1.5} />
-          <span className={classes.linkLabel}>Logout</span>
-        </a>
+        {isImpersonating ? (
+          <a
+            aria-label="Stop impersonating"
+            href="#"
+            className={classes.link}
+            onClick={handleStopImpersonating}
+          >
+            <IconUserOff className={classes.linkIcon} stroke={1.5} />
+            <span className={classes.linkLabel}>Stop impersonating</span>
+          </a>
+        ) : (
+          <a aria-label="Logout" href="#" className={classes.link} onClick={handleLogout}>
+            <IconLogout className={classes.linkIcon} stroke={1.5} />
+            <span className={classes.linkLabel}>Logout</span>
+          </a>
+        )}
       </div>
     </nav>
   );

@@ -20,4 +20,5 @@ export interface User {
   email_addresses: EmailAddress[];
   social_accounts: SocialAccount[];
   timezone: string;
+  is_impersonating: boolean;
 }

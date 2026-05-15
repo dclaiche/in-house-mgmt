@@ -1,7 +1,9 @@
 from allauth.account.models import EmailAddress
 from allauth.socialaccount.models import SocialAccount
-from django.contrib.auth import get_user_model
+from auditlog.models import LogEntry
+from django.contrib.auth import get_user_model, login
 from django.contrib.auth.models import Group
+from django.contrib.contenttypes.models import ContentType
 from rest_framework import filters, generics, mixins, permissions, status
 from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
@@ -50,7 +52,9 @@ class CurrentUserView(APIView):
 
     def get(self, request):
         serializer = UserDetailsSerializer(request.user)
-        return Response(serializer.data)
+        data = serializer.data
+        data["is_impersonating"] = "_impersonator_id" in request.session
+        return Response(data)
 
     def patch(self, request):
         serializer = UserDetailsSerializer(
@@ -230,3 +234,86 @@ class DiscordIDViewSet(
             )
         instance.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ImpersonateView(APIView):
+    def get_permissions(self):
+        if self.request.method in ("DELETE",):
+            return [IsAuthenticated()]
+        return [IsAdminUser()]
+
+    def post(self, request, pk=None):
+        if "_impersonator_id" in request.session:
+            return Response(
+                {"detail": "Already impersonating a user. Stop impersonation first."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        User = get_user_model()
+
+        try:
+            target_user = User.objects.get(pk=pk)
+            if target_user.is_superuser:
+                return Response({"detail": "You may not impersonate a superuser."}, status=status.HTTP_400_BAD_REQUEST)
+        except User.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if target_user.pk == request.user.pk:
+            return Response(
+                {"detail": "You cannot impersonate yourself."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        impersonator_pk = request.user.pk
+        impersonator = request.user
+        login(request, target_user, backend="django.contrib.auth.backends.ModelBackend")
+        request.session["_impersonator_id"] = impersonator_pk
+
+        LogEntry.objects.create(
+            content_type=ContentType.objects.get_for_model(User),
+            object_pk=str(target_user.pk),
+            object_repr=target_user.username,
+            action=LogEntry.Action.ACCESS,
+            actor=impersonator,
+            additional_data={"impersonation": "started", "impersonator": impersonator.username},
+        )
+
+        return Response({"detail": f"Now impersonating {target_user.username}."})
+
+    def delete(self, request, pk=None):
+        impersonator_id = request.session.get("_impersonator_id")
+        if impersonator_id is None:
+            return Response(
+                {"detail": "Not currently impersonating anyone."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if request.user.pk != pk:
+            return Response(
+                {"detail": "Not impersonating this user."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        User = get_user_model()
+        try:
+            original_user = User.objects.get(pk=impersonator_id)
+        except User.DoesNotExist:
+            return Response({"detail": "Original user not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not original_user.is_staff:
+            return Response({"detail": "Forbidden."}, status=status.HTTP_403_FORBIDDEN)
+
+        impersonated_user = request.user
+        # login() flushes the session (different user), so _impersonator_id is already gone
+        login(request, original_user, backend="django.contrib.auth.backends.ModelBackend")
+
+        LogEntry.objects.create(
+            content_type=ContentType.objects.get_for_model(User),
+            object_pk=str(impersonated_user.pk),
+            object_repr=impersonated_user.username,
+            action=LogEntry.Action.ACCESS,
+            actor=original_user,
+            additional_data={"impersonation": "stopped", "impersonator": original_user.username},
+        )
+
+        return Response({"detail": f"Stopped impersonating. Returned to {original_user.username}."})

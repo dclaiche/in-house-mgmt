@@ -6,6 +6,7 @@ from .views import (
     CurrentUserView,
     DiscordIDViewSet,
     GroupListView,
+    ImpersonateView,
     ManagedUserViewSet,
     SocialConnectionDeleteView,
     ToggleUserActiveView,
@@ -26,6 +27,7 @@ urlpatterns = [
     path("users/", UserSearchView.as_view(), name="user-search"),
     path("management/groups/", GroupListView.as_view(), name="group-list"),
     path("management/users/<int:pk>/toggle-active/", ToggleUserActiveView.as_view(), name="toggle-user-active"),
+    path("management/users/<int:pk>/impersonate/", ImpersonateView.as_view(), name="impersonate-user"),
     path(
         "health/",
         HealthCheckView.as_view(

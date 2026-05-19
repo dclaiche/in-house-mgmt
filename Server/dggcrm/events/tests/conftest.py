@@ -70,6 +70,16 @@ def completed_event(db):
 
 
 @pytest.fixture
+def canceled_event(db):
+    return Event.objects.create(
+        name="Canceled Event",
+        event_status=EventStatus.CANCELED,
+        starts_at=timezone.now(),
+        ends_at=timezone.now() + timezone.timedelta(hours=2),
+    )
+
+
+@pytest.fixture
 def contact(db):
     return Contact.objects.create(
         full_name="Jane Contact",

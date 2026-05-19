@@ -32,6 +32,7 @@ class EventViewSet(viewsets.ModelViewSet):
         event_id = self.request.query_params.get("event")
         contact_id = self.request.query_params.get("contact")
         status = self.request.query_params.get("status")
+        exclude_status = self.request.query_params.get("exclude_status")
         event_type = self.request.query_params.get("event_type")
         category_id = self.request.query_params.get("category_id")
 
@@ -43,6 +44,9 @@ class EventViewSet(viewsets.ModelViewSet):
 
         if status:
             queryset = queryset.filter(event_status=status)
+
+        if exclude_status:
+            queryset = queryset.exclude(event_status__in=exclude_status.split(","))
 
         if event_type:
             queryset = queryset.filter(event_type=event_type)

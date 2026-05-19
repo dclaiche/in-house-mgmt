@@ -7,6 +7,29 @@ ENDPOINT = "/api/participants/"
 
 
 @pytest.mark.django_db
+class TestEventListFilters:
+    def setup_method(self):
+        self.client = APIClient()
+
+    def test_exclude_status_filters_completed_and_canceled_events(
+        self,
+        admin_user,
+        scheduled_event,
+        completed_event,
+        canceled_event,
+    ):
+        self.client.force_authenticate(user=admin_user)
+
+        response = self.client.get("/api/events/?exclude_status=completed,canceled")
+
+        assert response.status_code == 200
+        result_ids = {event["id"] for event in response.data["results"]}
+        assert scheduled_event.id in result_ids
+        assert completed_event.id not in result_ids
+        assert canceled_event.id not in result_ids
+
+
+@pytest.mark.django_db
 class TestParticipationCreate:
     def setup_method(self):
         self.client = APIClient()

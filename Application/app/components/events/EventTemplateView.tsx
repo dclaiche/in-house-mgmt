@@ -13,6 +13,7 @@ import {
   Text,
   ActionIcon,
   Select,
+  MultiSelect,
 } from "@mantine/core";
 import { IconPlus, IconSearch, IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
 import { useState, useEffect, useCallback } from "react";
@@ -28,6 +29,15 @@ interface EventTemplateViewProps {
   title?: string;
 }
 
+const eventStatusFilters = [
+  { value: "draft", label: "Draft" },
+  { value: "scheduled", label: "Scheduled" },
+  { value: "completed", label: "Completed" },
+  { value: "canceled", label: "Canceled" },
+];
+
+const defaultExcludedStatuses = ["completed", "canceled"];
+
 export default function EventTemplateView({ eventType, title = "Events" }: EventTemplateViewProps) {
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,6 +51,7 @@ export default function EventTemplateView({ eventType, title = "Events" }: Event
   const [submitting, setSubmitting] = useState(false);
   const [categories, setCategories] = useState<EventCategory[]>([]);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  const [excludedStatuses, setExcludedStatuses] = useState<string[]>(defaultExcludedStatuses);
 
   const form = useForm({
     initialValues: {
@@ -70,6 +81,8 @@ export default function EventTemplateView({ eventType, title = "Events" }: Event
           params.append("event_type", eventType);
           if (searchQuery) params.append("search", searchQuery);
           if (selectedCategoryId) params.append("category_id", selectedCategoryId);
+          if (excludedStatuses.length > 0)
+            params.append("exclude_status", excludedStatuses.join(","));
           fetchPath = `/events/?${params}`;
         }
 
@@ -90,7 +103,7 @@ export default function EventTemplateView({ eventType, title = "Events" }: Event
         setLoading(false);
       }
     },
-    [searchQuery, selectedCategoryId, eventType]
+    [searchQuery, selectedCategoryId, excludedStatuses, eventType]
   );
 
   useEffect(() => {
@@ -122,6 +135,20 @@ export default function EventTemplateView({ eventType, title = "Events" }: Event
     }
   };
 
+  const selectedStatuses = eventStatusFilters
+    .map((status) => status.value)
+    .filter((status) => !excludedStatuses.includes(status));
+  const selectedStatusLabels = eventStatusFilters
+    .filter((status) => selectedStatuses.includes(status.value))
+    .map((status) => status.label);
+  const statusFilterWidth = Math.min(
+    520,
+    Math.max(
+      220,
+      selectedStatusLabels.reduce((width, label) => width + label.length * 8 + 48, 48)
+    )
+  );
+
   return (
     <Container size="xl" py="xl">
       <Stack gap="md">
@@ -139,34 +166,55 @@ export default function EventTemplateView({ eventType, title = "Events" }: Event
         </Group>
 
         <Paper p="md" withBorder>
-          <Group gap="md" align="flex-end">
-            <TextInput
-              label="Search"
-              placeholder="Search by name, description, or location..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              leftSection={<IconSearch size={16} />}
-              style={{ flex: 1 }}
-            />
-            <Select
-              label="Event Category"
-              placeholder="All categories"
-              data={categories.map((c) => ({ value: String(c.id), label: c.name }))}
-              value={selectedCategoryId}
-              onChange={setSelectedCategoryId}
-              clearable
-            />
-            <Button
-              variant="outline"
-              onClick={() => {
-                setSearchQuery("");
-                setSelectedCategoryId(null);
-              }}
-              style={{ marginTop: 24 }}
-            >
-              Reset
-            </Button>
-          </Group>
+          <Stack gap="md">
+            <Group gap="md" align="flex-end" justify="space-between">
+              <Group gap="md" align="flex-end" style={{ flex: 1, minWidth: 0 }}>
+                <TextInput
+                  label="Search"
+                  placeholder="Search by name, description, or location..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  leftSection={<IconSearch size={16} />}
+                  style={{ flex: 1, minWidth: 220 }}
+                />
+                <Select
+                  label="Event Category"
+                  placeholder="All categories"
+                  data={categories.map((c) => ({ value: String(c.id), label: c.name }))}
+                  value={selectedCategoryId}
+                  onChange={setSelectedCategoryId}
+                  clearable
+                />
+              </Group>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setSearchQuery("");
+                  setSelectedCategoryId(null);
+                  setExcludedStatuses(defaultExcludedStatuses);
+                }}
+                style={{ marginTop: 24 }}
+              >
+                Reset
+              </Button>
+            </Group>
+
+            <Group>
+              <MultiSelect
+                label="Status"
+                data={eventStatusFilters}
+                value={selectedStatuses}
+                w={statusFilterWidth}
+                onChange={(values) => {
+                  setExcludedStatuses(
+                    eventStatusFilters
+                      .map((status) => status.value)
+                      .filter((status) => !values.includes(status))
+                  );
+                }}
+              />
+            </Group>
+          </Stack>
         </Paper>
 
         <EventsTable

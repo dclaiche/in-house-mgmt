@@ -4,7 +4,7 @@ import { Anchor, Container, Stack } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { apiClient, ApiError } from "@/app/lib/apiClient";
 import TemplateForm, { type TemplateFormValues } from "@/app/components/templates/TemplateForm";
 import { useUser } from "@/app/components/provider/UserContext";
@@ -19,7 +19,7 @@ const EMPTY_VALUES: TemplateFormValues = {
   description_template: "",
 };
 
-export default function NewTemplatePage() {
+function NewTemplateContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { isAdmin } = useUser();
@@ -74,5 +74,13 @@ export default function NewTemplatePage() {
         />
       </Stack>
     </Container>
+  );
+}
+
+export default function NewTemplatePage() {
+  return (
+    <Suspense fallback={null}>
+      <NewTemplateContent />
+    </Suspense>
   );
 }

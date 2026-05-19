@@ -1,6 +1,6 @@
 import pytest
 from django.contrib.auth import get_user_model
-from django.contrib.auth.models import Group
+from django.contrib.auth.models import Group, Permission
 
 User = get_user_model()
 
@@ -40,16 +40,51 @@ def nonadmin_client(api_client, regular_user):
 
 
 @pytest.fixture
+def manager_user(db, sample_groups):
+    """Non-superuser with manage_users (via ORGANIZER group) plus
+    view_all_contacts so promotion lookups succeed for the typical case."""
+    organizer = next(g for g in sample_groups if g.name == "ORGANIZER")
+    user = User.objects.create_user(username="manager", password="testpass123")
+    user.groups.add(organizer)
+    user.user_permissions.add(Permission.objects.get(codename="view_all_contacts"))
+    return user
+
+
+@pytest.fixture
+def manager_client(api_client, manager_user):
+    """Authenticated API client holding manage_users perm via ORGANIZER group."""
+    api_client.force_authenticate(user=manager_user)
+    return api_client
+
+
+@pytest.fixture
+def manager_user_no_contact_access(db, sample_groups):
+    """Manager with manage_users but NO contact visibility. Used to verify
+    that promotion respects the contact ACL."""
+    organizer = next(g for g in sample_groups if g.name == "ORGANIZER")
+    user = User.objects.create_user(username="limited_manager", password="testpass123")
+    user.groups.add(organizer)
+    return user
+
+
+@pytest.fixture
+def manager_client_no_contact_access(api_client, manager_user_no_contact_access):
+    api_client.force_authenticate(user=manager_user_no_contact_access)
+    return api_client
+
+
+@pytest.fixture
 def sample_group(db):
-    """Creates a sample group."""
-    group = Group.objects.create(name="ORGANIZER")
+    """Returns the ORGANIZER group (created by accounts migration 0003 if missing)."""
+    group, _ = Group.objects.get_or_create(name="ORGANIZER")
     return group
 
 
 @pytest.fixture
 def sample_groups(db):
-    """Creates sample groups."""
+    """Returns ORGANIZER, HELPER, TRAINEE groups (creating any that are missing)."""
     groups = []
     for name in ["ORGANIZER", "HELPER", "TRAINEE"]:
-        groups.append(Group.objects.create(name=name))
+        group, _ = Group.objects.get_or_create(name=name)
+        groups.append(group)
     return groups

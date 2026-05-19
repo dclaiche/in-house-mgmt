@@ -16,6 +16,7 @@ from .permissions import (
     CanCommentOnTicketPermission,
     TicketClaimPermission,
     TicketObjectPermission,
+    TicketTemplatePermission,
     get_ticket_visibility_filter,
 )
 from .serializers import (
@@ -95,8 +96,15 @@ class TicketViewSet(viewsets.ModelViewSet):
     def bulk_create_tickets(self, request):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        tickets = serializer.save()
-        return Response({"created_count": len(tickets)}, status=status.HTTP_201_CREATED)
+        result = serializer.save()
+        response = {"created_count": len(result["tickets"])}
+        if result["saved_template"]:
+            response["template"] = {
+                "id": result["saved_template"].id,
+                "name": result["saved_template"].name,
+                "action": result["template_action"],
+            }
+        return Response(response, status=status.HTTP_201_CREATED)
 
     # TODO: Limit this API to organizer role or above
     @action(detail=False, methods=["get"])
@@ -434,10 +442,16 @@ class TicketStatusesViewSet(viewsets.ViewSet):
 
 
 class TicketTemplateViewSet(viewsets.ModelViewSet):
-    queryset = TicketTemplate.objects.all().order_by("name")
     serializer_class = TicketTemplateSerializer
-    permission_classes = [IsAuthenticated, DjangoModelPermissions]
+    permission_classes = [IsAuthenticated, TicketTemplatePermission]
     filter_backends = [filters.OrderingFilter, filters.SearchFilter]
     search_fields = ["name"]
     ordering_fields = ["name", "created_at", "modified_at"]
     ordering = ["name"]
+
+    def get_queryset(self):
+        return TicketTemplate.objects.for_user(self.request.user).order_by("name")
+
+    def perform_create(self, serializer):
+        is_global = serializer.validated_data.pop("is_global", False)
+        serializer.save(owner=None if is_global else self.request.user)

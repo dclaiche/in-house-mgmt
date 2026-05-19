@@ -3,9 +3,35 @@ export interface TicketType {
   label: string;
 }
 
+export const TICKET_TYPE_LABELS: Record<string, string> = {
+  UNKNOWN: "Unknown",
+  INTRODUCTION: "Introduction",
+  RECRUIT: "Recruit for event",
+  CONFIRM: "Confirm event participation",
+};
+
+export const PRIORITY_OPTIONS = [
+  { value: "0", label: "P0 – Emergency" },
+  { value: "1", label: "P1 – Very High" },
+  { value: "2", label: "P2 – High" },
+  { value: "3", label: "P3 – Normal" },
+  { value: "4", label: "P4 – Low" },
+  { value: "5", label: "P5 – Very Low" },
+];
+
+export function getPriorityLabel(priority: number | string): string {
+  const value = String(priority);
+  return PRIORITY_OPTIONS.find((p) => p.value === value)?.label ?? `P${value}`;
+}
+
 export interface TicketTemplate {
   id: number;
   name: string;
+  owner_id: number | null;
+  is_global: boolean;
+  forked_from_id: number | null;
+  forked_from_name: string | null;
+  can_edit: boolean;
   title_template: string;
   description_template: string;
   ticket_type: string;

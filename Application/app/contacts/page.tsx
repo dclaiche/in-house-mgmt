@@ -8,29 +8,21 @@ import {
   Modal,
   MultiSelect,
   Paper,
-  Select,
   Stack,
   Text,
   TextInput,
   Title,
 } from "@mantine/core";
-import { DateInput } from "@mantine/dates";
-import {
-  IconCalendar,
-  IconChevronLeft,
-  IconChevronRight,
-  IconPlus,
-  IconSearch,
-} from "@tabler/icons-react";
+import { IconChevronLeft, IconChevronRight, IconPlus } from "@tabler/icons-react";
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { useDebouncedValue } from "@mantine/hooks";
 import { apiClient } from "@/app/lib/apiClient";
 import { useForm } from "@mantine/form";
 import { TicketBulkCreateModal } from "@/app/components/tickets/TicketBulkCreateModal";
-import RangeSliderInput from "@/app/components/RangeSliderInput";
 import ContactTable, { type Contact, type Tag } from "@/app/components/ContactTable";
+import ContactsFilterBar, { type ContactsFilterValues } from "@/app/components/ContactsFilterBar";
 import { type EventCategory } from "@/app/components/event-utils";
-import { useDebouncedValue } from "@mantine/hooks";
 import "./page.css";
 
 const MAX_TAG_COUNT = 99999;
@@ -127,11 +119,7 @@ export default function ContactsPage() {
             params.append("tag_ids", debouncedSelectedTagIds.join(","));
             params.append("tag_mode", tagMode);
           }
-          if (params.size > 0) {
-            fetchUrl = `/contacts/?${params}`;
-          } else {
-            fetchUrl = "/contacts/";
-          }
+          fetchUrl = params.size > 0 ? `/contacts/?${params}` : "/contacts/";
         }
 
         const data = await apiClient.get<{
@@ -152,9 +140,9 @@ export default function ContactsPage() {
       }
     },
     [
+      endDate,
       debouncedEventRange,
       debouncedTicketRange,
-      endDate,
       debouncedSearchQuery,
       selectedCategoryId,
       debouncedSelectedTagIds,
@@ -222,13 +210,16 @@ export default function ContactsPage() {
     }
   };
 
-  function rangeLabelFormatter(n: number): string {
-    if (n === RANGE_LIMITS[1]) {
-      return `${RANGE_LIMITS[1]}+`;
-    } else {
-      return n.toString();
-    }
-  }
+  const handleFilterChange = (changes: Partial<ContactsFilterValues>) => {
+    if (changes.searchQuery !== undefined) setSearchQuery(changes.searchQuery);
+    if (changes.startDate !== undefined) setStartDate(changes.startDate);
+    if (changes.endDate !== undefined) setEndDate(changes.endDate);
+    if (changes.tagMode !== undefined) setTagMode(changes.tagMode);
+    if (changes.selectedTagIds !== undefined) setSelectedTagIds(changes.selectedTagIds);
+    if (changes.selectedCategoryId !== undefined) setSelectedCategoryId(changes.selectedCategoryId);
+    if (changes.eventRange !== undefined) setEventRange(changes.eventRange);
+    if (changes.ticketRange !== undefined) setTicketRange(changes.ticketRange);
+  };
 
   const toggleRowSelection = (id: number) => {
     setSelectedRows((prev) => {
@@ -253,108 +244,22 @@ export default function ContactsPage() {
           </Button>
         </Group>
 
-        {/* Filters */}
-        <Paper p="md" withBorder>
-          <Stack gap="md">
-            <Group gap="md" align="flex-end" grow>
-              <TextInput
-                label="Search"
-                placeholder="Search name, Discord ID..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                leftSection={<IconSearch size={16} />}
-                style={{ flex: 1, minWidth: 200 }}
-              />
-              <DateInput
-                label="Start Date"
-                value={startDate}
-                onChange={setStartDate}
-                clearable
-                placeholder="Start Date..."
-                leftSection={<IconCalendar size={16} />}
-              />
-              <DateInput
-                label="End Date"
-                onChange={setEndDate}
-                clearable
-                value={endDate}
-                placeholder="End Date..."
-                leftSection={<IconCalendar size={16} />}
-              />
-            </Group>
-            <Group gap="md" align="flex-end">
-              <Group gap={0} align="flex-end" style={{ flex: 1 }}>
-                <Select
-                  label="Tags"
-                  data={[
-                    { value: "any", label: "Any of" },
-                    { value: "all", label: "All of" },
-                  ]}
-                  value={tagMode}
-                  onChange={(v) => setTagMode((v as "any" | "all") || "any")}
-                  allowDeselect={false}
-                  styles={{
-                    input: {
-                      borderTopRightRadius: 0,
-                      borderBottomRightRadius: 0,
-                      borderRight: "none",
-                      width: 100,
-                    },
-                  }}
-                />
-                <MultiSelect
-                  aria-label="Tag Ids"
-                  data={tags.map((t) => ({ value: String(t.id), label: t.name }))}
-                  value={selectedTagIds}
-                  onChange={setSelectedTagIds}
-                  placeholder="Search tags..."
-                  searchable
-                  clearable
-                  style={{ flex: 1 }}
-                  styles={{
-                    input: {
-                      borderTopLeftRadius: 0,
-                      borderBottomLeftRadius: 0,
-                      overflowX: "auto",
-                      flexWrap: "nowrap",
-                    },
-                  }}
-                />
-              </Group>
-
-              <Select
-                label="Event Category"
-                placeholder="All categories"
-                data={categories.map((c) => ({ value: String(c.id), label: c.name }))}
-                value={selectedCategoryId}
-                onChange={setSelectedCategoryId}
-                clearable
-              />
-
-              <RangeSliderInput
-                label="# of Events Attended"
-                min={RANGE_LIMITS[0]}
-                max={RANGE_LIMITS[1]}
-                minRange={0}
-                value={eventRange}
-                onChange={setEventRange}
-                labelFormatter={rangeLabelFormatter}
-              />
-              <RangeSliderInput
-                label="# of Closed Tickets"
-                min={RANGE_LIMITS[0]}
-                max={RANGE_LIMITS[1]}
-                minRange={0}
-                value={ticketRange}
-                onChange={setTicketRange}
-                labelFormatter={rangeLabelFormatter}
-              />
-              <Button variant="outline" onClick={handleReset} ml="auto">
-                Reset
-              </Button>
-            </Group>
-          </Stack>
-        </Paper>
+        <ContactsFilterBar
+          values={{
+            searchQuery,
+            startDate,
+            endDate,
+            tagMode,
+            selectedTagIds,
+            selectedCategoryId,
+            eventRange,
+            ticketRange,
+          }}
+          onChange={handleFilterChange}
+          tags={tags}
+          categories={categories}
+          onReset={handleReset}
+        />
 
         {/* Create Tickets action bar */}
         <Paper p="sm" withBorder>

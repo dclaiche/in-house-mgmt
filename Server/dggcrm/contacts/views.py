@@ -1,9 +1,10 @@
-from django.db.models import Count, Q
+from django.db.models import Count, Exists, OuterRef, Q
 from rest_framework import filters, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import DjangoModelPermissions, IsAuthenticated
 from rest_framework.response import Response
 
+from dggcrm.accounts.models import DiscordID
 from dggcrm.tickets.models import TicketAsks, TicketAskStatus
 
 from ..events.models import CommitmentStatus, EventType
@@ -23,7 +24,11 @@ from .serializers import (
 
 # TODO: Add permission_classes to these views
 class ContactViewSet(viewsets.ModelViewSet):
-    queryset = Contact.objects.all().prefetch_related("taggings__tag")
+    queryset = (
+        Contact.objects.all()
+        .prefetch_related("taggings__tag")
+        .annotate(is_user=Exists(DiscordID.objects.filter(discord_id=OuterRef("discord_id"))))
+    )
     serializer_class = ContactSerializer
     permission_classes = [IsAuthenticated, DjangoModelPermissions, ContactObjectPermission]
 

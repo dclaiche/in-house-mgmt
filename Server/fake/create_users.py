@@ -54,6 +54,7 @@ GROUP_PERMISSIONS = {
         "assign_ticket",
         "add_any_comment",
         "change_ticket",
+        "manage_users",
     ],
     "HELPER": [
         "view_contact",

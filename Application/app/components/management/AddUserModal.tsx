@@ -7,7 +7,7 @@ import { apiClient } from "@/app/lib/apiClient";
 import { useForm } from "@mantine/form";
 import formatApiPayload from "@/app/utils/format-api-payload";
 
-interface Group {
+export interface Group {
   id: number;
   name: string;
 }
@@ -61,6 +61,10 @@ export default function AddUserModal({ opened, onClose, onSuccess, availableGrou
       },
       discordId: (value, values) => {
         if (!value.trim() && !values.email.trim()) return "Discord ID or Email is required";
+        return null;
+      },
+      selectedGroups: (value) => {
+        if (!value || value.length === 0) return "Select at least one group";
         return null;
       },
     },
@@ -166,7 +170,8 @@ export default function AddUserModal({ opened, onClose, onSuccess, availableGrou
           data={groupOptions}
           {...form.getInputProps("selectedGroups")}
           clearable
-          description="Assign group memberships. Default is no group."
+          required
+          description="Each user must belong to at least one group."
         />
 
         <Group justify="flex-end" mt="md">

@@ -162,7 +162,7 @@ def populate_templates(conn):
         c.execute(
             """INSERT INTO ticket_templates (name, ticket_type, title_template, description_template, default_priority, requires_contact, requires_event, created_at, modified_at)
                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-               ON CONFLICT (name) DO NOTHING""",
+               ON CONFLICT ON CONSTRAINT unique_template_name_per_owner DO NOTHING""",
             (
                 tpl["name"],
                 tpl["ticket_type"],

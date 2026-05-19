@@ -13,6 +13,7 @@ import {
   Center,
   HoverCard,
   Checkbox,
+  Tooltip,
 } from "@mantine/core";
 
 export interface Contact {
@@ -22,6 +23,15 @@ export interface Contact {
   email: string | null;
   phone: string | null;
   tags?: Tag[];
+  is_user?: boolean;
+  is_promotable?: boolean;
+}
+
+/** A Contact plus optional per-row display state. Extends Contact so a
+ * plain Contact is structurally a valid row — callers that don't need
+ * disabled state can pass Contact[] straight through. */
+export interface ContactRowData extends Contact {
+  disabledReason?: string;
 }
 
 export interface Group {
@@ -37,7 +47,7 @@ export interface Tag {
 }
 
 interface ContactTableProps {
-  contacts: Contact[];
+  contacts: ContactRowData[];
   loading?: boolean;
   onRowClick?: (contact: Contact) => void;
   showTitle?: boolean;
@@ -131,27 +141,26 @@ export default function ContactTable({
     return parts.length > 0 ? parts.join(" • ") : "No contact info";
   };
 
-  const allOnPageSelected =
-    isSelectable && contacts.length > 0 && contacts.every((c) => selectedIds?.has(c.id));
+  const selectableContactIds = contacts.filter((c) => !c.disabledReason).map((c) => c.id);
 
-  const someOnPageSelected = isSelectable && contacts.some((c) => selectedIds?.has(c.id));
+  const allOnPageSelected =
+    isSelectable &&
+    selectableContactIds.length > 0 &&
+    selectableContactIds.every((id) => selectedIds?.has(id));
+
+  const someOnPageSelected =
+    isSelectable && selectableContactIds.some((id) => selectedIds?.has(id));
 
   const toggleSelectAllOnPage = () => {
     if (!toggleSelect || !selectedIds) return;
 
     if (allOnPageSelected) {
-      // DESELECT all rows on this page
-      contacts.forEach((c) => {
-        if (selectedIds.has(c.id)) {
-          toggleSelect(c.id);
-        }
+      selectableContactIds.forEach((id) => {
+        if (selectedIds.has(id)) toggleSelect(id);
       });
     } else {
-      // SELECT all rows on this page
-      contacts.forEach((c) => {
-        if (!selectedIds.has(c.id)) {
-          toggleSelect(c.id);
-        }
+      selectableContactIds.forEach((id) => {
+        if (!selectedIds.has(id)) toggleSelect(id);
       });
     }
   };
@@ -191,25 +200,35 @@ export default function ContactTable({
             ) : (
               contacts.map((contact) => {
                 const selected = selectedIds?.has(contact.id);
+                const disabledReason = contact.disabledReason;
+                const disabled = Boolean(disabledReason);
 
                 return (
                   <Table.Tr
                     key={contact.id}
                     bg={selected ? "var(--mantine-color-blue-light)" : undefined}
-                    style={{ cursor: "pointer" }}
+                    style={{
+                      cursor: disabled ? "not-allowed" : "pointer",
+                      opacity: disabled ? 0.55 : 1,
+                    }}
                     onClick={() => {
+                      if (disabled) return;
                       if (isSelectable && toggleSelect && selectedIds?.size) {
-                        // If anything is selected, row click toggles selection
                         toggleSelect(contact.id);
                       } else {
-                        // Otherwise, normal row click behavior
                         onRowClick?.(contact);
                       }
                     }}
                   >
                     {isSelectable && (
                       <Table.Td onClick={(e) => e.stopPropagation()}>
-                        <Checkbox checked={selected} onChange={() => toggleSelect!(contact.id)} />
+                        {disabled ? (
+                          <Tooltip label={disabledReason} withArrow>
+                            <Checkbox checked={false} disabled />
+                          </Tooltip>
+                        ) : (
+                          <Checkbox checked={selected} onChange={() => toggleSelect!(contact.id)} />
+                        )}
                       </Table.Td>
                     )}
 

@@ -10,6 +10,7 @@ export type { User };
 interface UserContextValue {
   user: User | null;
   loading: boolean;
+  isAdmin: boolean;
   refresh: () => Promise<void>;
 }
 
@@ -44,11 +45,14 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     fetchUser();
   }, [fetchUser]);
 
+  const isAdmin = user?.groups.includes("ADMIN") ?? false;
+
   return (
     <UserContext.Provider
       value={{
         user,
         loading,
+        isAdmin,
         refresh: fetchUser,
       }}
     >

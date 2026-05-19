@@ -4,6 +4,8 @@ from auditlog.models import LogEntry
 from django.contrib.auth import get_user_model, login
 from django.contrib.auth.models import Group
 from django.contrib.contenttypes.models import ContentType
+from django.db import transaction
+from django.db.models import Q
 from rest_framework import filters, generics, mixins, permissions, status
 from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
@@ -11,10 +13,19 @@ from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet
 
 from config.pagination import StandardPagination
+from dggcrm.contacts.models import Contact
+from dggcrm.contacts.permissions import get_contact_visibility_filter
 from dggcrm.discord.permissions import DISCORD_BOT_GROUP
 
 from .models import DiscordID, UserPreferences
+from .permissions import (
+    MANAGEABLE_USER_GROUPS,
+    ORGANIZER_GROUP,
+    CanManageUsers,
+    can_manage_users,
+)
 from .serializers import (
+    ContactPromotionSerializer,
     DiscordIDSerializer,
     GroupSerializer,
     ManagedUserSerializer,
@@ -22,20 +33,191 @@ from .serializers import (
     UpdateUserSerializer,
     UserDetailsSerializer,
     UserPreferencesSerializer,
+    UserRoleUpdateSerializer,
     UserSearchSerializer,
     UserSerializer,
+    split_full_name,
+    unique_username_from_full_name,
 )
 
 
-class UserSearchView(generics.ListAPIView):
-    permission_classes = [IsAuthenticated]
-    serializer_class = UserSearchSerializer
+class UserViewSet(
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.CreateModelMixin,
+    mixins.UpdateModelMixin,
+    GenericViewSet,
+):
+    """
+    Unified user endpoint at /api/users/.
+
+    - list/retrieve are open to any authenticated user (preserves the
+      assignee-picker behavior of the former UserSearchView). Pass
+      `?groups=HELPER,TRAINEE,ORGANIZER` to restrict the list to specific
+      groups (the /users management screen uses this).
+    - create / partial_update require the `manage_users` perm. Writes are
+      additionally restricted to non-admin sub-org users so an organizer
+      cannot deactivate an admin.
+    - `manage_users` requesters get the richer ManagedUserSerializer shape;
+      everyone else gets the lightweight UserSearchSerializer.
+    """
+
     pagination_class = StandardPagination
-    filter_backends = [filters.SearchFilter]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ["username", "first_name", "last_name"]
+    ordering_fields = ["username", "first_name", "last_name"]
+    ordering = ["username"]
+
+    def get_permissions(self):
+        if self.action in ("create", "update", "partial_update"):
+            return [IsAuthenticated(), CanManageUsers()]
+        return [IsAuthenticated()]
 
     def get_queryset(self):
-        return self.serializer_class.Meta.model.objects.all()
+        User = get_user_model()
+        qs = User.objects.all()
+
+        if self.action in ("update", "partial_update"):
+            qs = (
+                qs.exclude(is_superuser=True)
+                .exclude(groups__name=DISCORD_BOT_GROUP)
+                .filter(groups__name__in=MANAGEABLE_USER_GROUPS)
+                .distinct()
+            )
+            if not self.request.user.is_superuser:
+                qs = qs.exclude(groups__name=ORGANIZER_GROUP)
+        else:
+            params = self.request.query_params
+            groups_param = params.get("groups")
+            include_admins = params.get("include_admins") == "true"
+            if groups_param or include_admins:
+                q = Q()
+                if groups_param:
+                    requested = [g.strip() for g in groups_param.split(",") if g.strip()]
+                    if requested:
+                        q |= Q(groups__name__in=requested)
+                if include_admins:
+                    q |= Q(is_superuser=True)
+                qs = qs.filter(q).distinct()
+
+        if can_manage_users(self.request.user):
+            qs = qs.prefetch_related("discord_ids", "groups")
+        return qs.order_by("username")
+
+    def get_serializer_class(self):
+        if self.action == "create":
+            return ContactPromotionSerializer
+        if self.action in ("update", "partial_update"):
+            return UserRoleUpdateSerializer
+        if can_manage_users(self.request.user):
+            return ManagedUserSerializer
+        return UserSearchSerializer
+
+    def create(self, request, *args, **kwargs):
+        items = request.data if isinstance(request.data, list) else [request.data]
+
+        created, skipped, errors = [], [], []
+        with transaction.atomic():
+            for index, item in enumerate(items):
+                result = self._promote_one(item, index)
+                bucket = result.pop("_bucket")
+                if bucket == "created":
+                    created.append(result)
+                elif bucket == "skipped":
+                    skipped.append(result)
+                else:
+                    errors.append(result)
+
+        return Response(
+            {"created": created, "skipped": skipped, "errors": errors},
+            status=status.HTTP_201_CREATED,
+        )
+
+    def _promote_one(self, item, index):
+        serializer = ContactPromotionSerializer(data=item, context={"user": self.request.user})
+        if not serializer.is_valid():
+            return {"_bucket": "errors", "index": index, "input": item, "errors": serializer.errors}
+
+        contact_id = serializer.validated_data["contact_id"]
+        role = serializer.validated_data["role"]
+
+        visibility = get_contact_visibility_filter(self.request.user)
+        try:
+            contact = Contact.objects.filter(visibility).distinct().get(pk=contact_id)
+        except Contact.DoesNotExist:
+            return {
+                "_bucket": "errors",
+                "index": index,
+                "contact_id": contact_id,
+                "errors": {"contact_id": ["Contact not found."]},
+            }
+
+        if not contact.discord_id:
+            return {
+                "_bucket": "errors",
+                "index": index,
+                "contact_id": contact_id,
+                "errors": {"discord_id": ["Discord ID required."]},
+            }
+
+        if DiscordID.objects.filter(discord_id=contact.discord_id).exists():
+            return {
+                "_bucket": "skipped",
+                "index": index,
+                "contact_id": contact_id,
+                "reason": "already_a_user",
+            }
+
+        first_name, last_name = split_full_name(contact.full_name)
+        username = unique_username_from_full_name(contact.full_name)
+
+        User = get_user_model()
+        # The OAuth adapter resolves non-Discord logins via both User.email
+        # and verified EmailAddress rows, so either kind of collision would
+        # let a future social login attach to the wrong account. A verified
+        # EmailAddress would also collide with allauth's unique_verified_email
+        # constraint when we create the row below. Skip attaching the email
+        # if any existing user already owns it through either path.
+        attach_email = bool(contact.email) and not (
+            User.objects.filter(email=contact.email).exists()
+            or EmailAddress.objects.filter(email=contact.email, verified=True).exists()
+        )
+
+        user = User.objects.create(
+            username=username,
+            email=contact.email if attach_email else "",
+            first_name=first_name,
+            last_name=last_name,
+            is_active=True,
+        )
+
+        user.set_unusable_password()
+        user.save(update_fields=["password"])
+
+        if attach_email:
+            EmailAddress.objects.create(
+                user=user,
+                email=contact.email,
+                primary=True,
+                verified=True,
+            )
+        DiscordID.objects.create(user=user, discord_id=contact.discord_id, active=True)
+        group, _ = Group.objects.get_or_create(name=role)
+        user.groups.add(group)
+
+        return {
+            "_bucket": "created",
+            "index": index,
+            "contact_id": contact_id,
+            "user": ManagedUserSerializer(user).data,
+        }
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = UserRoleUpdateSerializer(instance, data=request.data, partial=True, context={"user": request.user})
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(ManagedUserSerializer(instance).data, status=status.HTTP_200_OK)
 
 
 class SocialConnectionDeleteView(generics.DestroyAPIView):

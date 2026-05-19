@@ -3,7 +3,7 @@ import { render, screen, userEvent, waitFor } from "../../../test-utils/render";
 import AddUserModal from "./AddUserModal";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
-import { Group } from "./UsersSection";
+import { Group } from "./AddUserModal";
 
 const mockGroups: Group[] = [
   { id: 1, name: "ORGANIZER" },
@@ -84,7 +84,7 @@ describe("AddUserModal", () => {
   });
 
   describe("form submission", () => {
-    it("calls onSuccess on successful creation", async () => {
+    it("blocks submission when no group is selected", async () => {
       const user = userEvent.setup();
       render(<AddUserModal {...defaultProps} />);
 
@@ -93,9 +93,9 @@ describe("AddUserModal", () => {
       await user.click(screen.getByRole("button", { name: /create user/i }));
 
       await waitFor(() => {
-        expect(defaultProps.onSuccess).toHaveBeenCalled();
-        expect(defaultProps.onClose).toHaveBeenCalled();
+        expect(screen.getByText("Select at least one group")).toBeInTheDocument();
       });
+      expect(defaultProps.onSuccess).not.toHaveBeenCalled();
     });
 
     it("resets form on open after close", async () => {

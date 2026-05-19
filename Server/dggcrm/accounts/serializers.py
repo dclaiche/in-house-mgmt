@@ -2,11 +2,24 @@ from allauth.account.models import EmailAddress
 from allauth.socialaccount.models import SocialAccount
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+from django.utils.text import slugify
 from rest_framework import serializers
 
 from .models import DiscordID, UserPreferences
+from .permissions import MANAGEABLE_USER_GROUPS, ORGANIZER_GROUP, can_manage_users
 
 User = get_user_model()
+
+
+class _OrganizerRoleGateMixin:
+    """Reject role="ORGANIZER" unless the requesting user is a superuser."""
+
+    def validate_role(self, value):
+        if value == ORGANIZER_GROUP:
+            user = self.context.get("user") if self.context else None
+            if not (user and user.is_superuser):
+                raise serializers.ValidationError("Only admins can assign the ORGANIZER role.")
+        return value
 
 
 class UserDetailsSerializer(serializers.ModelSerializer):
@@ -14,6 +27,7 @@ class UserDetailsSerializer(serializers.ModelSerializer):
     social_accounts = serializers.SerializerMethodField()
     groups = serializers.SerializerMethodField()
     timezone = serializers.SerializerMethodField()
+    can_manage_users = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -27,7 +41,11 @@ class UserDetailsSerializer(serializers.ModelSerializer):
             "email_addresses",
             "social_accounts",
             "timezone",
+            "can_manage_users",
         ]
+
+    def get_can_manage_users(self, user) -> bool:
+        return can_manage_users(user)
 
     def get_timezone(self, user):
         try:
@@ -93,6 +111,7 @@ class ManagedUserSerializer(serializers.ModelSerializer):
     discord_ids = serializers.SerializerMethodField()
     is_superuser = serializers.BooleanField(read_only=True)
     is_active = serializers.BooleanField(read_only=True)
+    last_login = serializers.DateTimeField(read_only=True)
 
     class Meta:
         model = User
@@ -106,6 +125,7 @@ class ManagedUserSerializer(serializers.ModelSerializer):
             "discord_ids",
             "is_superuser",
             "is_active",
+            "last_login",
         ]
 
     def get_groups(self, user):
@@ -210,6 +230,58 @@ class UserSerializer(serializers.Serializer):
                 pass
 
         return user
+
+
+def unique_username_from_full_name(full_name: str) -> str:
+    base = slugify(full_name) or "user"
+    candidate = base
+    suffix = 2
+    while User.objects.filter(username=candidate).exists():
+        candidate = f"{base}-{suffix}"
+        suffix += 1
+    return candidate
+
+
+def split_full_name(full_name: str) -> tuple[str, str]:
+    parts = full_name.strip().split(maxsplit=1)
+    if not parts:
+        return "", ""
+    if len(parts) == 1:
+        return parts[0], ""
+    return parts[0], parts[1]
+
+
+class ContactPromotionSerializer(_OrganizerRoleGateMixin, serializers.Serializer):
+    """
+    Validates a single {contact_id, role} item for promotion through
+    UserViewSet.create. Build-only — never used for reads.
+    """
+
+    contact_id = serializers.IntegerField()
+    role = serializers.ChoiceField(choices=MANAGEABLE_USER_GROUPS)
+
+
+class UserRoleUpdateSerializer(_OrganizerRoleGateMixin, serializers.Serializer):
+    """
+    Handles role swap and active toggle on an existing sub-org user.
+    Both fields are optional; sending neither is a no-op.
+    """
+
+    role = serializers.ChoiceField(choices=MANAGEABLE_USER_GROUPS, required=False)
+    is_active = serializers.BooleanField(required=False)
+
+    def update(self, instance, validated_data):
+        role = validated_data.get("role")
+        if role is not None:
+            instance.groups.remove(*Group.objects.filter(name__in=MANAGEABLE_USER_GROUPS))
+            group, _ = Group.objects.get_or_create(name=role)
+            instance.groups.add(group)
+
+        if "is_active" in validated_data:
+            instance.is_active = validated_data["is_active"]
+            instance.save(update_fields=["is_active"])
+
+        return instance
 
 
 class UpdateUserSerializer(serializers.Serializer):

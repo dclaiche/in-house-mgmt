@@ -4,11 +4,14 @@ import { usePathname } from "next/navigation";
 import {
   IconHome,
   IconTicket,
+  IconTemplate,
   IconUser,
   IconUsers,
+  IconUserShield,
   IconCalendarEvent,
   IconPhone,
   IconEyeFilled,
+  IconSettings,
   IconLogout,
   IconUserOff,
   IconBuilding,
@@ -21,6 +24,7 @@ import { useState } from "react";
 import { handleLogout } from "@/app/utils/oauth";
 import { apiClient } from "@/app/lib/apiClient";
 import { useUser } from "@/app/components/provider/UserContext";
+import { canManageUsers } from "@/app/users/permissions";
 
 const notAdminData = [
   { link: "/home", label: "Home", icon: IconHome },
@@ -31,11 +35,13 @@ const notAdminData = [
 
 const internalLinks = [{ link: "/phone-bank", label: "Internal Phone Bank", icon: IconPhone }];
 
-const adminOnly = [{ link: "/management", label: "Management", icon: IconEyeFilled }];
+const managementTemplatesLink = { link: "/templates", label: "Templates", icon: IconTemplate };
+const managementUsersLink = { link: "/users", label: "Users", icon: IconUserShield };
+const managementSettingsLink = { link: "/management", label: "Settings", icon: IconSettings };
 
 export default function NavbarSimple() {
   const pathname = usePathname();
-  const { user } = useUser();
+  const { user, isAdmin } = useUser();
   const isImpersonating = user?.is_impersonating ?? false;
 
   const [collapsed, setCollapsed] = useState(false);
@@ -46,11 +52,30 @@ export default function NavbarSimple() {
   };
 
   const data = notAdminData;
-  const isAdmin = user?.groups.includes("ADMIN") ?? false;
+  const canManage = canManageUsers(user);
 
   const showNavbar = pathname !== "/login";
 
   const isInternalActive = internalLinks.some((item) => item.link === pathname);
+  const isManagementActive = [
+    managementTemplatesLink.link,
+    managementUsersLink.link,
+    managementSettingsLink.link,
+  ].includes(pathname);
+
+  const [internalOpen, setInternalOpen] = useState(isInternalActive);
+  const [managementOpen, setManagementOpen] = useState(isManagementActive);
+
+  const handleNavLinkClick =
+    (open: boolean, setOpen: (v: boolean) => void) => (e: React.MouseEvent) => {
+      if (collapsed) {
+        e.preventDefault();
+        setCollapsed(false);
+        setOpen(true);
+      } else {
+        setOpen(!open);
+      }
+    };
 
   if (!showNavbar) {
     return null;
@@ -95,7 +120,8 @@ export default function NavbarSimple() {
           className={classes.navLinkRoot}
           label="Internal"
           leftSection={<IconBuilding stroke={1.5} className={classes.navLinkIcon} />}
-          defaultOpened={isInternalActive}
+          opened={internalOpen}
+          onClick={handleNavLinkClick(internalOpen, setInternalOpen)}
           classNames={{
             children: classes.navLinkChildren,
             label: classes.navLinkLabel,
@@ -130,19 +156,63 @@ export default function NavbarSimple() {
       </div>
 
       <div className={classes.footer}>
-        {isAdmin &&
-          adminOnly.map((item) => (
+        <NavLink
+          aria-label="Management"
+          className={classes.navLinkRoot}
+          label="Management"
+          leftSection={<IconEyeFilled stroke={1.5} className={classes.navLinkIcon} />}
+          opened={managementOpen}
+          onClick={handleNavLinkClick(managementOpen, setManagementOpen)}
+          classNames={{
+            children: classes.navLinkChildren,
+            label: classes.navLinkLabel,
+            section: classes.navLinkSection,
+          }}
+          styles={{
+            body: {
+              display: collapsed ? "none" : undefined,
+            },
+            root: {
+              padding: "var(--mantine-spacing-xs) var(--mantine-spacing-sm)",
+              borderRadius: "var(--mantine-radius-sm)",
+              fontSize: "var(--mantine-font-size-sm)",
+              fontWeight: 500,
+            },
+            label: { padding: 0 },
+          }}
+        >
+          <Link
+            aria-label={managementTemplatesLink.label}
+            className={classes.link}
+            data-active={managementTemplatesLink.link === pathname || undefined}
+            href={managementTemplatesLink.link}
+          >
+            <managementTemplatesLink.icon className={classes.linkIcon} stroke={1.5} />
+            <span>{managementTemplatesLink.label}</span>
+          </Link>
+          {canManage && (
             <Link
-              aria-label={item.label}
+              aria-label={managementUsersLink.label}
               className={classes.link}
-              data-active={item.link === pathname || undefined}
-              href={item.link}
-              key={item.label}
+              data-active={managementUsersLink.link === pathname || undefined}
+              href={managementUsersLink.link}
             >
-              <item.icon className={classes.linkIcon} stroke={1.5} />
-              <span className={classes.linkLabel}>{item.label}</span>
+              <managementUsersLink.icon className={classes.linkIcon} stroke={1.5} />
+              <span>{managementUsersLink.label}</span>
             </Link>
-          ))}
+          )}
+          {isAdmin && (
+            <Link
+              aria-label={managementSettingsLink.label}
+              className={classes.link}
+              data-active={managementSettingsLink.link === pathname || undefined}
+              href={managementSettingsLink.link}
+            >
+              <managementSettingsLink.icon className={classes.linkIcon} stroke={1.5} />
+              <span>{managementSettingsLink.label}</span>
+            </Link>
+          )}
+        </NavLink>
 
         <Link
           aria-label="Profile"

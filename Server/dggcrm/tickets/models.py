@@ -133,15 +133,47 @@ class Ticket(models.Model):
 auditlog.register(Ticket)
 
 
+class TicketTemplateQuerySet(models.QuerySet):
+    def globals(self):
+        return self.filter(owner__isnull=True)
+
+    def for_user(self, user):
+        return self.filter(models.Q(owner__isnull=True) | models.Q(owner=user))
+
+
+class TicketTemplateManager(models.Manager.from_queryset(TicketTemplateQuerySet)):
+    pass
+
+
 class TicketTemplate(models.Model):
     """
     Template for creating tickets with templated title and description.
     Uses Django template syntax for dynamic content.
+
+    A template is either global (``owner`` is NULL) or personal to a single user.
     """
 
     id = models.AutoField(primary_key=True)
 
-    name = models.CharField(max_length=100, unique=True)
+    name = models.CharField(max_length=100)
+
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="ticket_templates",
+        help_text="Owner of this personal template. NULL means the template is global (visible to everyone).",
+    )
+
+    forked_from = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="forks",
+        help_text="The template this one was forked from, if any. SET_NULL so forks survive upstream deletion.",
+    )
 
     title_template = models.TextField(
         blank=True,
@@ -177,11 +209,24 @@ class TicketTemplate(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     modified_at = models.DateTimeField(auto_now=True)
 
+    objects = TicketTemplateManager()
+
     class Meta:
         db_table = "ticket_templates"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["name", "owner"],
+                name="unique_template_name_per_owner",
+                nulls_distinct=False,
+            ),
+        ]
 
     def __str__(self):
         return self.name
+
+    @property
+    def is_global(self) -> bool:
+        return self.owner_id is None
 
 
 class TicketComment(models.Model):

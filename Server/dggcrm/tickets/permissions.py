@@ -175,3 +175,30 @@ class CanChangeTicketStatusPermission(BasePermission):
             return True
 
         return ticket.assigned_to_id == user.id
+
+
+class TicketTemplatePermission(BasePermission):
+    """Visibility + write rules for ``TicketTemplate``.
+
+    Read:  authenticated users can read any global template or any template they own.
+    Write: superusers can write any template; owners can write their own personal templates.
+           Organizers cannot mutate global templates.
+    """
+
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(user and user.is_authenticated)
+
+    def has_object_permission(self, request, view, template):
+        user = request.user
+
+        if not user or not user.is_authenticated:
+            return False
+
+        if user.is_superuser:
+            return True
+
+        if request.method in SAFE_METHODS:
+            return template.owner_id is None or template.owner_id == user.id
+
+        return template.owner_id == user.id

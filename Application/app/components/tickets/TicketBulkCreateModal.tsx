@@ -4,6 +4,7 @@ import {
   TextInput,
   Textarea,
   Button,
+  Checkbox,
   Group,
   Stack,
   Text,
@@ -14,7 +15,12 @@ import {
 import { useState, useEffect, useMemo } from "react";
 import { notifications } from "@mantine/notifications";
 import { apiClient } from "@/app/lib/apiClient";
-import { type TicketTemplate } from "@/app/components/tickets/ticket-utils";
+import {
+  getPriorityLabel,
+  PRIORITY_OPTIONS,
+  TICKET_TYPE_LABELS,
+  type TicketTemplate,
+} from "@/app/components/tickets/ticket-utils";
 import { SearchSelect, SearchSelectOption } from "@/app/components/SearchSelect";
 
 interface Event {
@@ -41,17 +47,9 @@ interface Props {
   opened: boolean;
   onClose: () => void;
   contactIds: number[];
+  initialTemplate?: TicketTemplate | null;
   onSuccess?: () => void;
 }
-
-const PRIORITY_OPTIONS = [
-  { value: "0", label: "P0 – Emergency" },
-  { value: "1", label: "P1 – Very High" },
-  { value: "2", label: "P2 – High" },
-  { value: "3", label: "P3 – Normal" },
-  { value: "4", label: "P4 – Low" },
-  { value: "5", label: "P5 – Very Low" },
-];
 
 function renderTemplate(
   templateStr: string,
@@ -84,25 +82,35 @@ async function fetchEvent(id: number): Promise<Event | null> {
   }
 }
 
-const TICKET_TYPE_LABELS: Record<string, string> = {
-  UNKNOWN: "Unknown",
-  INTRODUCTION: "Introduction",
-  RECRUIT: "Recruit for event",
-  CONFIRM: "Confirm event participation",
-};
-
-export function TicketBulkCreateModal({ opened, onClose, contactIds, onSuccess }: Props) {
+export function TicketBulkCreateModal({
+  opened,
+  onClose,
+  contactIds,
+  initialTemplate,
+  onSuccess,
+}: Props) {
   useEffect(() => {
     if (opened) {
-      setTitle("");
-      setDescription("");
-      setSelectedTemplate(null);
-      setTicketType(null);
-      setPriority(null);
+      if (initialTemplate) {
+        setSelectedTemplate(initialTemplate);
+        setTitle(initialTemplate.title_template);
+        setDescription(initialTemplate.description_template);
+        setTicketType(initialTemplate.ticket_type);
+        setPriority(String(initialTemplate.default_priority));
+      } else {
+        setTitle("");
+        setDescription("");
+        setSelectedTemplate(null);
+        setTicketType(null);
+        setPriority(null);
+      }
       setEvent(null);
       setAssignedToId(null);
+      setSaveTemplateChecked(false);
+      setSaveTemplateName("");
+      setSaveTemplateNameTouched(false);
     }
-  }, [opened]);
+  }, [opened, initialTemplate]);
 
   const [selectedTemplate, setSelectedTemplate] = useState<TicketTemplate | null>(null);
   const [ticketType, setTicketType] = useState<string | null>(null);
@@ -115,6 +123,9 @@ export function TicketBulkCreateModal({ opened, onClose, contactIds, onSuccess }
   const [assignedToId, setAssignedToId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<string | null>("template");
+  const [saveTemplateChecked, setSaveTemplateChecked] = useState(false);
+  const [saveTemplateName, setSaveTemplateName] = useState("");
+  const [saveTemplateNameTouched, setSaveTemplateNameTouched] = useState(false);
 
   useEffect(() => {
     if (!selectedTemplate) return;
@@ -179,9 +190,36 @@ export function TicketBulkCreateModal({ opened, onClose, contactIds, onSuccess }
     [description, previewContextData]
   );
 
+  const isEdited = useMemo(() => {
+    if (!selectedTemplate) {
+      return title.trim().length > 0 || description.trim().length > 0;
+    }
+    return (
+      title !== selectedTemplate.title_template ||
+      description !== selectedTemplate.description_template
+    );
+  }, [selectedTemplate, title, description]);
+
+  const loadedIsMine = selectedTemplate && !selectedTemplate.is_global;
+  const saveMode: "create" | "update" = loadedIsMine ? "update" : "create";
+
+  const defaultSaveName = useMemo(() => {
+    if (selectedTemplate?.is_global) return `${selectedTemplate.name} (my copy)`;
+    if (loadedIsMine) return selectedTemplate?.name ?? "";
+    return title.split("{{")[0].trim();
+  }, [selectedTemplate, loadedIsMine, title]);
+
+  useEffect(() => {
+    if (!saveTemplateNameTouched) {
+      setSaveTemplateName(defaultSaveName);
+    }
+  }, [defaultSaveName, saveTemplateNameTouched]);
+
   const handleTemplateChange = (opt: SearchSelectOption<TicketTemplate> | null) => {
     const template = opt?.raw ?? null;
     setSelectedTemplate(template);
+    setSaveTemplateChecked(false);
+    setSaveTemplateNameTouched(false);
     if (template) {
       setTitle(template.title_template);
       setDescription(template.description_template);
@@ -241,14 +279,28 @@ export function TicketBulkCreateModal({ opened, onClose, contactIds, onSuccess }
     if (assignedToId) payload.assigned_to_id = Number(assignedToId);
     if (priority !== null) payload.priority = Number(priority);
 
+    if (saveTemplateChecked && isEdited) {
+      if (saveMode === "create") {
+        payload.save_template = { mode: "create", name: saveTemplateName.trim() };
+      } else if (selectedTemplate) {
+        payload.save_template = { mode: "update", target_id: selectedTemplate.id };
+      }
+    }
+
     try {
-      await apiClient.post("/tickets/bulk/", payload);
-      const count = contactIds.length;
-      notifications.show({
-        title: "Success",
-        message: `Successfully created ${count} ticket${count === 1 ? "" : "s"}!`,
-        color: "green",
-      });
+      const response = await apiClient.post<{
+        created_count: number;
+        template?: { id: number; name: string; action: "created" | "updated" };
+      }>("/tickets/bulk/", payload);
+      const count = response.created_count;
+      let message = `Successfully created ${count} ticket${count === 1 ? "" : "s"}!`;
+      if (response.template) {
+        message +=
+          response.template.action === "created"
+            ? ` Saved personal template "${response.template.name}".`
+            : ` Updated personal template "${response.template.name}".`;
+      }
+      notifications.show({ title: "Success", message, color: "green" });
       onSuccess?.();
       onClose();
     } catch (err) {
@@ -265,26 +317,38 @@ export function TicketBulkCreateModal({ opened, onClose, contactIds, onSuccess }
   return (
     <Modal opened={opened} onClose={onClose} title="Bulk Create Tickets" size="xl" centered>
       <Stack gap="md">
-        <Group grow>
+        <Group grow align="flex-start">
           {/* Template */}
-          <SearchSelect<TicketTemplate>
-            endpoint="/api/ticket-templates/"
-            label="Template"
-            placeholder="Select template"
-            limit={10}
-            value={
-              selectedTemplate
-                ? { id: selectedTemplate.id, label: selectedTemplate.name, raw: selectedTemplate }
-                : null
-            }
-            onChange={handleTemplateChange}
-            clearable
-            mapResult={(tpl) => ({
-              id: tpl.id,
-              label: tpl.name,
-              raw: tpl,
-            })}
-          />
+          <Stack gap={4}>
+            <SearchSelect<TicketTemplate>
+              endpoint="/api/ticket-templates/"
+              label="Template"
+              placeholder="Select template"
+              limit={10}
+              value={
+                selectedTemplate
+                  ? { id: selectedTemplate.id, label: selectedTemplate.name, raw: selectedTemplate }
+                  : null
+              }
+              onChange={handleTemplateChange}
+              clearable
+              mapResult={(tpl) => ({
+                id: tpl.id,
+                label: tpl.name,
+                raw: tpl,
+              })}
+            />
+            {selectedTemplate &&
+              (selectedTemplate.is_global ? (
+                <Badge size="xs" color="blue" variant="light">
+                  Shared · read-only template
+                </Badge>
+              ) : (
+                <Badge size="xs" color="teal" variant="light">
+                  Mine · personal template
+                </Badge>
+              ))}
+          </Stack>
 
           {/* Event */}
           <SearchSelect<Event>
@@ -323,7 +387,7 @@ export function TicketBulkCreateModal({ opened, onClose, contactIds, onSuccess }
             label="Priority"
             placeholder={
               selectedTemplate
-                ? `${PRIORITY_OPTIONS.find((p) => p.value === String(selectedTemplate.default_priority))?.label} (DEFAULT)`
+                ? `${getPriorityLabel(selectedTemplate.default_priority)} (DEFAULT)`
                 : "Select priority"
             }
             data={PRIORITY_OPTIONS}
@@ -405,12 +469,47 @@ export function TicketBulkCreateModal({ opened, onClose, contactIds, onSuccess }
           </Tabs.Panel>
         </Tabs>
 
+        {isEdited && (
+          <Stack gap={4} pt="xs" style={{ borderTop: "1px solid var(--mantine-color-gray-3)" }}>
+            <Group gap="sm" wrap="nowrap" align="center">
+              <Checkbox
+                checked={saveTemplateChecked}
+                onChange={(e) => setSaveTemplateChecked(e.currentTarget.checked)}
+                label={
+                  saveMode === "update" ? (
+                    <Text size="sm">
+                      Update <em>{selectedTemplate?.name}</em> with these edits
+                    </Text>
+                  ) : (
+                    <Text size="sm">Save as a new personal template</Text>
+                  )
+                }
+              />
+              {saveMode === "create" && (
+                <TextInput
+                  placeholder="Name this template"
+                  value={saveTemplateName}
+                  onChange={(e) => {
+                    setSaveTemplateName(e.currentTarget.value);
+                    setSaveTemplateNameTouched(true);
+                  }}
+                  disabled={!saveTemplateChecked}
+                  style={{ flex: 1 }}
+                />
+              )}
+            </Group>
+          </Stack>
+        )}
+
         {/* Footer */}
         <Group justify="space-between" mt="md">
           <Text size="sm" c="dimmed">
             {contactIds.length === 0
               ? "No tickets will be created"
               : `${contactIds.length} ticket${contactIds.length !== 1 ? "s" : ""} will be created`}
+            {saveTemplateChecked &&
+              isEdited &&
+              ` · 1 personal template will be ${saveMode === "update" ? "updated" : "saved"}`}
           </Text>
 
           <Group>

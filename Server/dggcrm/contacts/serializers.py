@@ -5,6 +5,8 @@ from .models import Contact, Tag, TagAssignments
 
 class ContactSerializer(serializers.ModelSerializer):
     tags = serializers.SerializerMethodField()
+    is_user = serializers.BooleanField(read_only=True, default=False)
+    is_promotable = serializers.SerializerMethodField()
 
     class Meta:
         model = Contact
@@ -19,6 +21,9 @@ class ContactSerializer(serializers.ModelSerializer):
         """Get tags for this person"""
         assigned_tags = TagAssignments.objects.filter(contact_id=obj).select_related("tag")
         return [{"id": at.tag.id, "name": at.tag.name, "color": at.tag.color} for at in assigned_tags]
+
+    def get_is_promotable(self, obj) -> bool:
+        return bool(obj.discord_id) and not getattr(obj, "is_user", False)
 
     def to_representation(self, instance):
         data = super().to_representation(instance)

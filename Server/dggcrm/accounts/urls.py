@@ -11,10 +11,11 @@ from .views import (
     SocialConnectionDeleteView,
     ToggleUserActiveView,
     UserPreferencesView,
-    UserSearchView,
+    UserViewSet,
 )
 
 router = DefaultRouter()
+router.register("users", UserViewSet, basename="users")
 router.register("management/users", ManagedUserViewSet, basename="managed-users")
 router.register("management/discord-ids", DiscordIDViewSet, basename="discord-ids")
 
@@ -24,7 +25,6 @@ urlpatterns = [
     ),
     path("auth/user/", CurrentUserView.as_view(), name="current-user"),
     path("auth/preferences/", UserPreferencesView.as_view(), name="user-preferences"),
-    path("users/", UserSearchView.as_view(), name="user-search"),
     path("management/groups/", GroupListView.as_view(), name="group-list"),
     path("management/users/<int:pk>/toggle-active/", ToggleUserActiveView.as_view(), name="toggle-user-active"),
     path("management/users/<int:pk>/impersonate/", ImpersonateView.as_view(), name="impersonate-user"),

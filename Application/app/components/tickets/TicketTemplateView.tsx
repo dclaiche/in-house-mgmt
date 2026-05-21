@@ -81,8 +81,7 @@ export default function TicketTemplateView({
   const [priorities, setPriorities] = useState<{ value: string; label: string }[]>([]);
 
   // SearchSelect needs the option's label to display; URL only carries the ID.
-  // Cache the last-clicked option locally so refresh-by-URL can still drive the filter
-  // (the input shows empty until the user re-opens it — acceptable v1 trade-off).
+  // The hydration effects below resolve the label when state arrives from the URL.
   const [assigneeOption, setAssigneeOption] = useState<SearchSelectOption<UserResult> | null>(null);
   const [eventOption, setEventOption] = useState<SearchSelectOption<EventResult> | null>(null);
 
@@ -93,8 +92,50 @@ export default function TicketTemplateView({
       .catch(() => {});
   }, []);
 
+  // Hydrate the assignee SearchSelect's label from `state.assigneeId` (which the URL carries) so
+  // a shared / refreshed link shows the persisted user instead of an empty input. The
+  // option-in-deps + id-match early-exit keeps this from looping after the effect's own setState.
+  useEffect(() => {
+    const id = state.assigneeId;
+    if (id === undefined) return;
+    if (assigneeOption && Number(assigneeOption.id) === id) return;
+    let cancelled = false;
+    apiClient
+      .get<UserResult>(`/users/${id}/`)
+      .then((u) => {
+        if (cancelled) return;
+        setAssigneeOption({
+          id: u.id,
+          label: u.first_name ? `${u.first_name} ${u.last_name} (${u.username})` : u.username,
+          raw: u,
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [state.assigneeId, assigneeOption]);
+
+  // Same idea for the event SearchSelect — uses the standard DRF retrieve endpoint.
+  useEffect(() => {
+    const id = state.eventId;
+    if (id === undefined) return;
+    if (eventOption && Number(eventOption.id) === id) return;
+    let cancelled = false;
+    apiClient
+      .get<EventResult>(`/events/${id}/`)
+      .then((e) => {
+        if (cancelled) return;
+        setEventOption({ id: e.id, label: e.name, raw: e });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [state.eventId, eventOption]);
+
   // The displayed option is the cached one only when its id matches the URL state.
-  // Direct-URL nav or reset will not match → render empty input (filter still applies).
+  // Direct-URL nav lands on `null` for one render until the hydration effect resolves the label.
   const displayedAssignee =
     state.assigneeId !== undefined && Number(assigneeOption?.id) === state.assigneeId
       ? assigneeOption
